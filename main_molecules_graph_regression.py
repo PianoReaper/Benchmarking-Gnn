@@ -1,9 +1,18 @@
-"""
-    IMPORTING LIBS
-"""
+import sys
+import os
+from unittest.mock import MagicMock
+
+mock = MagicMock()
+sys.modules["torchdata"] = mock
+sys.modules["torchdata.datapipes"] = mock
+sys.modules["torchdata.datapipes.iter"] = mock
+
+
+os.environ['DGL_ENABLE_GRAPHBOLT'] = '0'
+os.environ['DGLBACKEND'] = 'pytorch'
+
 import dgl
 import numpy as np
-import os
 import time
 import random
 import argparse
@@ -15,9 +24,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
-
-# Erzwinge PyTorch Backend für DGL
-os.environ['DGLBACKEND'] = 'pytorch'
 
 """
     IMPORTING CUSTOM MODULES
@@ -55,7 +61,7 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
     root_log_dir, root_ckpt_dir, root_result_dir, root_config_dir = dirs
     device = net_params['device']
 
-    # GCN benötigt Self-Loops für stabile Performance auf ZINC
+
     if MODEL_NAME == 'GCN':
         net_params['self_loop'] = True
         dataset._add_self_loops()
@@ -63,7 +69,7 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
 
     trainset, valset, testset = dataset.train, dataset.val, dataset.test
 
-    # Seeds setzen für Reproduzierbarkeit
+
     random.seed(params['seed'])
     np.random.seed(params['seed'])
     torch.manual_seed(params['seed'])
@@ -77,7 +83,7 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
                                                      patience=params['lr_schedule_patience'],
                                                      verbose=True)
 
-    # DataLoaders
+
     train_loader = DataLoader(trainset, batch_size=params['batch_size'], shuffle=True, collate_fn=dataset.collate)
     val_loader = DataLoader(valset, batch_size=params['batch_size'], shuffle=False, collate_fn=dataset.collate)
     test_loader = DataLoader(testset, batch_size=params['batch_size'], shuffle=False, collate_fn=dataset.collate)
@@ -89,22 +95,22 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
             for epoch in t:
                 start = time.time()
 
-                # Nutze die bereinigten Funktionen aus train_molecules_graph_regression.py
+
                 epoch_train_loss, epoch_train_mae, optimizer = train_epoch_sparse(model, optimizer, device, train_loader, epoch)
                 epoch_val_loss, epoch_val_mae = evaluate_network_sparse(model, device, val_loader, epoch)
                 _, epoch_test_mae = evaluate_network_sparse(model, device, test_loader, epoch)
 
                 scheduler.step(epoch_val_loss)
 
-                # Fortschritt anzeigen
+
                 t.set_postfix(val_MAE=f"{epoch_val_mae:.4f}", test_MAE=f"{epoch_test_mae:.4f}", lr=f"{optimizer.param_groups[0]['lr']:.1e}")
 
-                # Loggen
+
                 writer.add_scalar('train/_loss', epoch_train_loss, epoch)
                 writer.add_scalar('val/_mae', epoch_val_mae, epoch)
                 writer.add_scalar('test/_mae', epoch_test_mae, epoch)
 
-                # Checkpointing (alle 10 Epochen oder letzte)
+
                 if epoch % 10 == 0 or epoch == params['epochs'] - 1:
                     if not os.path.exists(root_ckpt_dir): os.makedirs(root_ckpt_dir)
                     torch.save(model.state_dict(), f"{root_ckpt_dir}/epoch_{epoch}.pkl")
@@ -131,7 +137,7 @@ def main():
     with open(args.config) as f:
         config = json.load(f)
 
-    # CLI Overrides (wichtig für die .sh Skripte)
+
     if args.seed: config['params']['seed'] = args.seed
     if args.dataset: config['dataset'] = args.dataset
     if args.out_dir: config['out_dir'] = args.out_dir
@@ -145,7 +151,6 @@ def main():
     net_params['num_atom_type'] = dataset.num_atom_type
     net_params['num_bond_type'] = dataset.num_bond_type
 
-    # Verzeichnisse basierend auf Modell und Dataset erstellen
     out_dir = config['out_dir'] + f"{args.model}_{args.dataset}_GPU{args.gpu_id}/"
     dirs = (out_dir+'logs/', out_dir+'checkpoints/', out_dir+'results/', out_dir+'configs/')
     for d in dirs:
